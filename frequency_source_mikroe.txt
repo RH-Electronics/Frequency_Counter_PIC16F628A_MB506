@@ -1,0 +1,237 @@
+program freq628a
+' FREQUENCY COUNTER 10Hz- 5.000MHZ; 5.000MHZ- 250.000MHZ with MB506 Prescaler
+' Author: Alex Boguslavsky, RH Electronic http://rhelectronics.net
+' mail: support@rhelectronics.net
+' License: SHAREWARE. You can modify for your own personal needs. 
+' Commercial usage is restricted!
+' You are responsible for any hardware or software modifications!
+'-------------------------------------------------------------------------------
+' PROJECT SETTINGS, CONFIG   :$2007 : 0x2143
+' navigate Project--> Edit project
+'-------------------------------------------------------------------------------
+' MCU: PIC16F628A
+' Oscillator Frequency: 4.000000MHZ
+' Oscillator Selection: I/O Function on RA6, CLKIN on RA7
+' Watchgod Timer:   disabled
+' Power-Up Timer:   enabled
+' RA5/ MCLR:        disabled
+' Brown-Out Detect: enabled
+' LV Programming:   disabled
+' EE Protection:    disabled
+' Flash protection: disabled
+
+'-------------------------------------------------------------------------------
+' RECONNENDED MODES:
+' 1000ms for 0Hz-100KHz  prescaler OFF
+' 100ms  for 100KHz-5MHz prescaler OFF
+
+' 1000ms for 5MHz-16MHz   prescaler ON
+' 100ms  for 16MHz-250MHz prescaler ON
+
+'-------------------------------------------------------------------------------
+' HF INPUT
+' MB506 prescaler has 50 ohm input impedance and very sensitive for weak signals.
+' with MB506 you can measure weak radio signals. When input is not connected,
+' the prescaler will pick up radio frequency signals and LCD will
+' display some values between 50Mhz-500MHz
+
+'-------------------------------------------------------------------------------
+' LF INPUT
+' Low frequency input has good accuracy for signals up to 5MHz with minimum
+' amplitude of 1V peak-to-peak.
+'-------------------------------------------------------------------------------
+' LCD MODULE CONNECTION
+'-------------------------------------------------------------------------------
+dim LCD_RS as sbit at RB1_bit
+    LCD_EN as sbit at RB0_bit
+    LCD_D4 as sbit at RA3_bit
+    LCD_D5 as sbit at RA2_bit
+    LCD_D6 as sbit at RA0_bit
+    LCD_D7 as sbit at RA1_bit
+
+    LCD_RS_Direction as sbit at TRISB1_bit
+    LCD_EN_Direction as sbit at TRISB0_bit
+    LCD_D4_Direction as sbit at TRISA3_bit
+    LCD_D5_Direction as sbit at TRISA2_bit
+    LCD_D6_Direction as sbit at TRISA0_bit
+    LCD_D7_Direction as sbit at TRISA1_bit
+
+'-------------------------------------------------------------------------------
+' GLOBAL VARIABLES
+'-------------------------------------------------------------------------------
+dim freq     as word              ' 16 bit variable for frequency 2^16
+    freq1    as longword          ' 32 bit variable for frequency 2^32
+    cnt      as word              ' 16 bit variable for interrupt counter
+    ch       as byte              ' variable for extracting the frequency on LCD
+    ch1      as byte
+    ch2      as byte
+    n        as longint           ' 32 bit variable for delay counter
+
+dim TIMER_START as byte           ' Timer 1 start configuration byte
+    TIMER_STOP  as byte           ' Timer 1 stop configuration byte
+    prescaler   as byte           ' prescaler value
+    
+dim message     as string[16]     ' text variable for measuring window 100ms or 1000ms
+
+
+'-------------------------------------------------------------------------------
+' INTERRUPTS CONFIGURATION
+'-------------------------------------------------------------------------------
+sub procedure interrupt()         ' Timer 1 interrupt subprocedure
+  if (TMR1IF_bit = 1) then
+     inc (cnt)                    ' increment cnt variable each time Timer 1 is overflow
+     TMR1IF_bit = 0
+  end if
+end sub
+
+'-------------------------------------------------------------------------------
+' MAIN PROGRAM
+'-------------------------------------------------------------------------------
+main:
+ CMCON  = %00000111               ' turn off comparator module
+ TRISA  = %00100000               ' port A configuration
+ TRISB  = %01001100               ' port B configuration. RB2, RB3, RB6 as input
+ T1CON  = %00110110               ' Timer 1 control register, starting configuration: timer is stopped, external clock on RB6 not in sync with crystal oscillator, 1:8 prescale
+ PIE1   = %00000001               ' Periferal interrupt register. Enable Timer 1 overflow, all other interrupts are disabled
+ INTCON = %11000000               ' Global interrupt register. Enable allowed periferal interrupts.
+
+ 
+ Lcd_Init()                       ' Initialize Lcd
+ delay_ms(100)                    ' wait for the lcd module stabilization
+ Lcd_Cmd(_LCD_CLEAR)              ' Clear display
+ Lcd_Cmd(_LCD_CURSOR_OFF)         ' Cursor off
+ 
+ if PORTB.2 = 1 then              ' check RB2 prescaler switch S2
+  prescaler = 64                  ' select prescaler mode 1/64
+  LCD_OUT (2, 1, "1/64" )
+  PORTA.6 = 0                     ' turn on MB506
+  else
+  prescaler = 1                   ' select prescaler mode 1/1
+  PORTA.6 = 1                     ' turn off MB506
+ end if
+ 
+  while(1)                        ' main program cycle
+   cnt = 0                        ' zero cnt variable
+
+   TMR1H = 0x00                   ' zero 16 bit Timer 1 values
+   TMR1L = 0x00
+   if PORTB.3 = 1 then            ' if 100ms window selected on S1
+    message = " 100ms"            ' display 100ms on LCD
+    TIMER_START = %00110111       ' Timer 1 start value: timer is started, external clock on RB6 not in sync with crystal oscillator, 1:8 prescale
+    TIMER_STOP  = %00110110       ' Timer 1 stop value: timer is stopped, external clock on RB6 not in sync with crystal oscillator, 1:8 prescale
+
+       GIE_bit = 1                ' enable all interrupts
+       T1CON = TIMER_START        ' start Timer 1
+
+        for n = 0 to 2435         ' create custom 100ms delay window
+        next n
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+
+       T1CON = TIMER_STOP          ' stop Timer 1
+       GIE_bit = 0                 ' disable interrupts
+       
+   else                            ' if 100ms window selected
+    TIMER_START = %00000111        ' Timer 1 start value: timer is started, external clock on RB6 not in sync with crystal oscillator, 1:1 prescale
+    TIMER_STOP  = %00000110        ' Timer 1 stop value: timer is stopped, external clock on RB6 not in sync with crystal oscillator, 1:1 prescale
+    message = "1000ms"             ' display 1000ms on LCD
+    
+       GIE_bit = 1                 ' enable all interrupts
+       T1CON = TIMER_START         ' start Timer 1
+       delay_us(999999)            ' create 1000ms delay window
+       T1CON = TIMER_STOP          ' stop Timer 1
+       GIE_bit = 0                 ' disable interrupts
+   end if
+   
+   freq = TMR1L + TMR1H*256        ' calculate 16 bit frequency variable
+   
+   if PORTB.3 = 1 then             ' calculate frequency 32 bit variable
+   freq1 = freq*80*prescaler + 65536*80 * cnt * prescaler  ' if window duration is 100ms
+
+   else
+   freq1 = freq * prescaler + 65536 * cnt * prescaler      ' if window duartion is 1000ms
+
+   end if
+                ' Extract frequency on LCD
+                tens_of_MHz:                             ' extract megahertz
+                ch = freq1 div 100000000
+                 if ch>0 then
+                 LCD_Chr(1, 1, 48+ch)
+                 else
+                 LCD_Chr(1, 1, " ")
+                 end if
+                MHz:
+                ch1 = (freq1 div 10000000) mod 10
+                 if ch1>0 then
+                 LCD_Chr(1, 2, 48+ch1)
+                 else
+                     if ch>0 then
+                     LCD_Chr(1, 2, "0")
+                     else
+                     LCD_Chr(1, 2, " ")
+                     end if
+                 end if
+                ch2 = (freq1 div 1000000) mod 10
+                 if ch2>0 then
+                  LCD_Chr_CP(48+ch2)
+                  LCD_Chr_CP (".")
+                  LCD_OUT(1, 14, "MHz")
+                  goto hundred
+                 else
+                  if ch>0 then
+                  LCD_Chr(1, 3, "0")
+                  LCD_Chr_CP (".")
+                  LCD_OUT(1, 14, "MHz")
+                  goto hundred
+                  end if
+                 if ch1>0 then
+                  LCD_Chr(1, 3, "0")
+                  LCD_Chr_CP (".")
+                  LCD_OUT(1, 14, "MHz")
+                  goto hundred
+                  end if
+
+                  LCD_OUT(1, 14, "KHz")
+                 end if
+                 LCD_OUT(1, 3,  "  ")
+                 LCD_OUT(1, 14, "KHz")
+                 
+                hundred:                                   ' extract thousands
+                ch = (freq1 div 100000) mod 10
+                LCD_Chr (1, 5, 48+ch)
+                ch = (freq1 div 10000) mod 10
+                LCD_Chr_CP (48+ch)
+                ch = (freq1 div 1000) mod 10
+                LCD_Chr_CP (48+ch)
+
+                ten:                                        ' extract tens
+                if prescaler > 1 then
+                goto message
+                end if
+                LCD_Chr_CP (".")
+                ch = (freq1 div 100) mod 10
+                LCD_Chr_CP (48+ch)
+                ch = (freq1 div 10) mod 10
+                LCD_Chr_CP (48+ch)
+                ch = freq1 mod 10
+                LCD_Chr_CP (48+ch)
+                message:
+                LCD_OUT(2,11, message)
+    delay_ms(100)                                          ' wait 100ms before next loop  for proper LCD update
+    
+  wend
+
+end.
